@@ -321,6 +321,7 @@
 </div>
 
 <script src="https://arc.pamplemouche.com/socket.io/socket.io.js"></script>
+<script src="https://arc.pamplemouche.com/pamp-auth.js"></script>
 <script>
 'use strict';
 const API = 'https://arc.pamplemouche.com/api';
@@ -389,40 +390,15 @@ function checkAuth() {
   }
 }
 
-async function doLogin() {
-  const u = document.getElementById('loginUser').value.trim();
-  const p = document.getElementById('loginPass').value;
-  if (!u || !p) return showErr('Remplis tous les champs');
-  try {
-    const r = await fetch(API + '/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u,password:p}) });
-    const d = await r.json();
-    if (!d.ok) return showErr(d.error || 'Identifiants incorrects');
-    token = d.token; username = d.username.replace(/ \(ADM.*\)/, '');
-    localStorage.setItem('pamp_token', token);
-    localStorage.setItem('pamp_username', username);
-    checkAuth();
-  } catch(e) { showErr('Erreur de connexion'); }
-}
-
-async function doRegister() {
-  const u = document.getElementById('loginUser').value.trim();
-  const p = document.getElementById('loginPass').value;
-  if (!u || !p) return showErr('Remplis tous les champs');
-  try {
-    const r = await fetch(API + '/register', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u,password:p}) });
-    const d = await r.json();
-    if (!d.ok) return showErr(d.error || 'Erreur');
-    token = d.token; username = d.username;
-    localStorage.setItem('pamp_token', token);
-    localStorage.setItem('pamp_username', username);
-    checkAuth();
-  } catch(e) { showErr('Erreur'); }
-}
+// Sign-in / sign-up are now owned by the central login (login.pamplemouche.com).
+function doLogin() { PampAuth.redirectToLogin(); }
+function doRegister() { PampAuth.redirectToLogin(); }
 
 function logout() {
   token = null; username = null;
   localStorage.removeItem('pamp_token');
   localStorage.removeItem('pamp_username');
+  if (window.PampAuth && PampAuth.logout) { PampAuth.logout(); return; }
   location.reload();
 }
 function showErr(msg) { document.getElementById('loginErr').textContent = msg; }
@@ -435,18 +411,19 @@ async function fetchPamp() {
   } catch(e) {}
 }
 
-// Hash token auto-login
-(function() {
-  if (!token) {
-    const h = location.hash.match(/token=([a-zA-Z0-9]+)/);
-    if (h) {
-      token = h[1]; localStorage.setItem('pamp_token', token); location.hash = '';
-      fetch(API + '/me', { headers:{'Authorization':'Bearer '+token} }).then(r=>r.json()).then(d=>{
-        if (d.ok) { username = d.username; localStorage.setItem('pamp_username', username); checkAuth(); }
-      });
+// Centralized identity resolution: #token hash -> .pamplemouche.com cookie -> legacy localStorage.
+async function initAuth() {
+  try {
+    const user = await PampAuth.init();
+    if (user) {
+      token = PampAuth.getToken();
+      username = (user.displayName || user.username || username || '').replace(/ \(ADM.*\)/, '');
+      if (token) localStorage.setItem('pamp_token', token);
+      if (username) localStorage.setItem('pamp_username', username);
     }
-  }
-})();
+  } catch(e) {}
+  checkAuth();
+}
 
 // ===== LOBBY =====
 function showLobby() {
@@ -468,7 +445,7 @@ function showLobby() {
 
 function connectSocket() {
   if (socket && socket.connected) return;
-  socket = io('https://arc.pamplemouche.com/royale', { auth:{ token } });
+  socket = io('https://arc.pamplemouche.com/royale', { auth:{ token: (window.PampAuth && PampAuth.getToken()) || token } });
 
   socket.on('connect', () => { socket.emit('getLobby'); });
 
@@ -1490,7 +1467,7 @@ function esc(s) {
 // ===== GAME LOOP =====
 setInterval(sendInput, 50);
 requestAnimationFrame(render);
-checkAuth();
+initAuth();
 </script>
 </body>
 </html>
